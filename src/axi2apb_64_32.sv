@@ -199,12 +199,22 @@ module axi2apb_64_32 #(
     logic [31:0] RDATA_Q_0;
     logic [31:0] RDATA_Q_1;
 
-    assign PENABLE = write_req | read_req;
-    assign PWRITE  = write_req;
-    assign PADDR   = address[APB_ADDR_WIDTH-1:0];
+    logic        PREADY_FILT;
 
-    assign PWDATA  = WDATA[W_word_sel];
-    assign PSEL    = 1'b1;
+    always_ff @(posedge ACLK or negedge ARESETn) begin
+        if (!ARESETn) begin
+            PENABLE <= '0;
+        end else begin
+            PENABLE <= write_req | read_req;
+        end
+    end
+
+    assign PWRITE = write_req;
+    assign PADDR  = address[APB_ADDR_WIDTH-1:0];
+    assign PWDATA = WDATA[W_word_sel];
+    assign PSEL   = write_req | read_req | PENABLE;
+
+    assign PREADY_FILT = PREADY & PENABLE;
 
     // AXI WRITE ADDRESS CHANNEL BUFFER
     axi_aw_buffer #(
@@ -387,7 +397,7 @@ module axi2apb_64_32 #(
                 read_req  = 1'b1;
                 address   = ARADDR;
 
-                if (PREADY == 1'b1) begin// APB is READY --> RDATA is AVAILABLE
+                if (PREADY_FILT == 1'b1) begin// APB is READY --> RDATA is AVAILABLE
                     if (ARLEN == 0) begin
                         case (ARSIZE)
                             3'h3: begin
@@ -426,7 +436,7 @@ module axi2apb_64_32 #(
                     W_word_sel = 1'b0;
 
                 // There is a Pending WRITE!!
-                if (PREADY == 1'b1) begin // APB is READY --> WDATA is LAtched
+                if (PREADY_FILT == 1'b1) begin // APB is READY --> WDATA is LAtched
                     if (AWLEN == 0) begin // single write
                         case (AWSIZE)
                             3'h3: NS = SINGLE_WR_64;
@@ -447,7 +457,7 @@ module axi2apb_64_32 #(
                     read_req  = 1'b1;
                     address   = ARADDR;
 
-                    if (PREADY == 1'b1) begin // APB is READY --> RDATA is AVAILABLE
+                    if (PREADY_FILT == 1'b1) begin // APB is READY --> RDATA is AVAILABLE
                         if (ARLEN == 0) begin
                             case (ARSIZE)
                                 3'h3: begin
@@ -484,7 +494,7 @@ module axi2apb_64_32 #(
                                 W_word_sel = 1'b0;
 
                           // There is a Pending WRITE!!
-                            if (PREADY == 1'b1) begin// APB is READY --> WDATA is LAtched _APB_SLAVE_READY_
+                            if (PREADY_FILT == 1'b1) begin// APB is READY --> WDATA is LAtched _APB_SLAVE_READY_
                                   if(AWLEN == 0) begin //: _SINGLE_WRITE_
                                         case(AWSIZE)
                                             3'h3: NS = SINGLE_WR_64;
@@ -518,7 +528,7 @@ module axi2apb_64_32 #(
                 W_word_sel = 1'b1; // write the Second data chunk
                 write_req  = WVALID;
                 if (WVALID) begin
-                    if (PREADY == 1'b1)
+                    if (PREADY_FILT == 1'b1)
                         NS = SINGLE_WR;
                     else
                         NS = SINGLE_WR_64;
@@ -546,7 +556,7 @@ module axi2apb_64_32 #(
 
                 if (WVALID) begin
                     if (&WSTRB[7:4]) begin
-                        if(PREADY == 1'b1) begin
+                        if(PREADY_FILT == 1'b1) begin
                             NS          = BURST_WR;
                             WREADY      = 1'b1; // pop onother data from the WDATA fifo
                             decr_AWLEN  = 1'b1; // decrement the remaining BURST beat
@@ -578,7 +588,7 @@ module axi2apb_64_32 #(
                     W_word_sel = 1'b0; // write the Second data chunk first
                     write_req  = WVALID & (&WSTRB[3:0]);
                     if (WVALID) begin
-                        if (PREADY == 1'b1) begin
+                        if (PREADY_FILT == 1'b1) begin
                             NS          = BURST_WR_64;
                             incr_AWADDR = 1'b1;
                             decr_AWLEN  = 1'b1; //decrement the remaining BURST beat
@@ -598,7 +608,7 @@ module axi2apb_64_32 #(
                     NS      = IDLE;
                     ARREADY = 1'b1;
                 end else begin
-                    if (PREADY == 1'b1) begin // APB is READY --> RDATA is AVAILABLE
+                    if (PREADY_FILT == 1'b1) begin // APB is READY --> RDATA is AVAILABLE
                         decr_ARLEN     = 1'b1;
                         sample_RDATA_1 = 1'b1;
                         NS = BURST_RD;
@@ -627,7 +637,7 @@ module axi2apb_64_32 #(
                         ARREADY = 1'b1;
                     end else begin //: _READ_BUSRST_NOT_COMPLETED_
                         read_req = 1'b1;
-                        if (PREADY == 1'b1) begin // APB is READY --> RDATA is AVAILABLE
+                        if (PREADY_FILT == 1'b1) begin // APB is READY --> RDATA is AVAILABLE
                             sample_RDATA_0 = 1'b1;
                             NS             = BURST_RD_64;
                             incr_ARADDR    = 1'b1;
@@ -645,7 +655,7 @@ module axi2apb_64_32 #(
                 read_req = 1'b1;
                 address  = ARADDR_Q;
 
-                if (PREADY == 1'b1) begin // APB is READY --> RDATA is AVAILABLE
+                if (PREADY_FILT == 1'b1) begin // APB is READY --> RDATA is AVAILABLE
                     sample_RDATA_0 = 1'b1;
                     NS             = BURST_RD_64;
                     incr_ARADDR    = 1'b1;
@@ -673,7 +683,7 @@ module axi2apb_64_32 #(
             SINGLE_RD_64: begin
                 read_req       = 1'b1;
                 address        = ARADDR + 4;
-                if (PREADY == 1'b1) begin // APB is READY --> RDATA is AVAILABLE
+                if (PREADY_FILT == 1'b1) begin // APB is READY --> RDATA is AVAILABLE
                     NS = SINGLE_RD;
                     if(ARADDR[2:0] == 3'h4)
                         sample_RDATA_0 = 1'b1;
